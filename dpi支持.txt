@@ -1,0 +1,73 @@
+﻿
+Vista/Win7我们可以禁止DWM（Desktop Window Manager）， 禁用后该模式我们称之为Basic模式， 这种模式下的高DPI效果和XP一样。
+
+对于DWM没有禁掉的情况， Vista/Win7/Win8 对高DPI的支持又分为2种情况。
+1.和XP一样
+xp缩放模式，仅仅对系统的一些窗口有效，比如标题，菜单，系统控件。但在pait时候，dc的dpi还是96哦。vista以上，默认放大就是这个模式，这样系统也是为了兼容自绘制内容不会偏差，但是效果就有点怪。
+
+
+2.通过DWM虚拟化支持高DPI。
+
+该种方式的高DPI支持是通过DWM的缩放实现的， 具体过程是这样的， 比如我们当前系统的DPI是200%， 我们程序运行时，系统会告诉你当前DPI仍然是96（100%）， 所以我们程序会仍然按照100%的方式进行绘画， 但是但是系统给我们的坐标是根据DPI缩小过后的（也就是我们对窗口调用GetWindowRect或是通过GetSystemMetrics(SM_CXSCREEN)得到的大小会比实际大小减半） ， 当我们画完之后， DWM再对整个窗口进行200% 放大后画到屏幕上， 这样看起来我们的程序就自动支持高DPI了。
+
+ 这种方式看起来很美妙， 但是它也有缺点， 主要是经过缩放后的内容看起来会变模糊， 比如文字会有明显的锯齿。
+
+既然DWM虚拟化用户效果有时不是那么好， 那么我们很多时候可能会自己支持高DPI， 如何让我们的程序禁用该效果？
+事实上我们可以对每个进程对DWM虚拟化的支持进行设置和查询， 系统给我们提供了2个APi： SetProcessDPIAware 和 IsProcessDPIAware ， 通过调用SetProcessDPIAware ， 我们告诉系统不要对我们的程序进行DWM虚拟化。
+
+这里还有特殊情况也提一下： 我们在高DPI下通过窗口句柄取到的坐标信息是和目标程序是否支持DWM虚拟化相关联的， 我们对其他支持DWM虚拟化的程序窗口调用GetWindowRect， 取到的坐标也是经过DWM缩放后的坐标； 对禁用DWM虚拟化程序的窗口调用GetWindowRect, 取到的坐标则是没有经过缩放的原始坐标。
+
+ 最后我们再讨论下Win8.1 对高DPI的支持, WIn8.1对高DPi以3种方式支持 Process_DPI_Awareness ： 
+ 
+typedef enum _Process_DPI_Awareness { 
+  Process_DPI_Unaware            = 0,
+  Process_System_DPI_Aware       = 1,
+  Process_Per_Monitor_DPI_Aware  = 2
+} Process_DPI_Awareness;
+ 
+下面我们依次讨论这3种方式： 
+ 
+第一种Unaware, 该种方式是告诉系统， 我的程序不支持DPI aware, 请通过DWM虚拟化帮我们实现。 该方式和上面Win7/Win8对高DPI的支持的实现基本一样，主要区别是它通过GetWindowRect取到的坐标都是经过DWM缩放后的， 无论对方窗口是不是支持DWM虚拟化。
+
+第二种方式是System DPI aware， 该方式下告诉系统， 我的程序会在启动的显示器上自己支持DPI aware, 所以不需要对我进行DWM 虚拟化。 但是当我的程序被拖动到其他DPI不一样的显示器时， 请对我们先进行system DWM虚拟化缩放。
+
+第三种方式是Per Monitor DPI aware, 该方式是告诉系统， 请永远不要对我进行DWM虚拟化，我会自己针对不同的Monitor的DPi缩放比率进行缩放。
+
+再介绍下相关API：
+SetProcessDpiAwareness ：设置当前进程对高DPi的支持方式
+GetProcessDpiAwareness ：查询某个进程对高DPI的支持方式
+GetDpiForMonitor ： 获取某个Monitor的DPI
+WM_DPICHANGED ：当某个程序窗口被拖到另外一个DPI的Monitor时收到
+  
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Scaling Methods
+Traditionally, native Windows desktop applications rely on two mechanisms to draw on the screen:
+
+Call functions in the Graphics Device Interface (GDI) API to address the display. Usually, GDI coordinates map directly to screen pixels, regardless of monitor size and pixel density.
+Use Windows system fonts to draw text. This is optional, but most desktop applications use system fonts for most of their graphical user interface (GUI).
+In the old days, most monitors had the same pixel density of about 96 DPI, so GUIs drawn this way looked roughly the same on every system. But as pixel densities increased, application GUIs shrank in terms of centimeters or inches. Small text and fine details became increasingly harder to see.
+
+So Microsoft thought it would be a good idea to build some kind of display scaling into Windows. Both of the following methods are triggered by selecting a custom DPI setting that is higher than the minimum 96 DPI, and both methods attempt to scale up the size of display elements accordingly.
+
+Windows XP Style DPI Scaling
+The first of these methods dates back to Windows XP and is therefore known as Windows XP style DPI scaling. This method does not actually scale an application GUI as such. Only the system fonts and other system UI elements are enlarged at higher DPI settings.
+
+Otherwise, applications still draw their GUIs with a 1:1 correspondence of specified GDI coordinates to visible screen pixels. The only difference in their visual appearance is that any text drawn using system fonts is suddenly bigger, e.g. text labels on buttons. This causes obvious problems which we’ll get to in a minute.
+
+Windows Vista DPI Virtualization
+Windows Vista introduced a second option, rather lamely called “display scaling” with no further qualification, so as to maximize user confusion. We’ll use the more descriptive internal name: DPI virtualization. When this option is enabled, Windows still performs XP style scaling. Just as before, the sizes of all system fonts and system UI elements are increased.
+
+The difference is that applications which can handle high DPI settings are now expected to inform Windows of this fact. Such applications must set a new “DPI-aware” flag, either by calling the Win32 API function SetProcessDPIAware or preferably by embedding an application manifest with the flag dpiAware. If this DPI-aware flag is missing, Windows first renders the entire application window to an internal bitmap using 96 DPI sizes, and then scales up that bitmap to the current DPI setting before putting it on the screen.
+
+This would be a fantastic scaling method if all our monitors had the pixel density of modern mobile phones (300+ DPI). Unfortunately they don’t, and application windows scaled up in this fashion look annoyingly blurry at 120 DPI, a common pixel density. Prior to Windows 8.1 Microsoft therefore disabled DPI virtualization by default, except for pixel densities greater than 120 DPI. (Starting with Windows 8.1 Microsoft apparently assumes everyone has high-density displays.)
+
+Windows 8.1 has removed the option to force XP style scaling above 120 DPI (125%), so if you were using that option all your non-DPI-aware programs are now forced into bitmap scaling.
+
+
+
+
+
